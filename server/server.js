@@ -32,13 +32,21 @@ function readJSON(filePath) {
   try {
     const data = fs.readFileSync(filePath, 'utf8');
     return JSON.parse(data);
-  } catch {
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.error(`Error reading ${filePath}:`, err.message);
+    }
     return [];
   }
 }
 
 function writeJSON(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error(`Error writing ${filePath}:`, err.message);
+    throw err;
+  }
 }
 
 // POST /api/users — save user data to both JSON files
@@ -60,8 +68,12 @@ app.post('/api/users', apiLimiter, (req, res) => {
   users.push({ userId, name });
   details.push({ userId, age, address });
 
-  writeJSON(USERS_FILE, users);
-  writeJSON(DETAILS_FILE, details);
+  try {
+    writeJSON(USERS_FILE, users);
+    writeJSON(DETAILS_FILE, details);
+  } catch {
+    return res.status(500).json({ error: 'Failed to save user data.' });
+  }
 
   res.status(201).json({ message: 'User created successfully.' });
 });
@@ -88,9 +100,17 @@ app.get('/api/users/:userId', apiLimiter, (req, res) => {
   });
 });
 
+// Rate limiter for static file catch-all (200 requests per 15 minutes per IP)
+const staticLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Catch-all: serve React app for client-side routing
 if (fs.existsSync(CLIENT_DIST)) {
-  app.get('*', (req, res) => {
+  app.get('*', staticLimiter, (req, res) => {
     res.sendFile(path.join(CLIENT_DIST, 'index.html'));
   });
 }
